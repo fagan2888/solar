@@ -2,18 +2,31 @@
 
 import sys
 import numpy as np
+import pandas as pd
+import vector_tools as vt
 from scipy.constants import G as G0
 import matplotlib.pyplot as plt
 plt.ion()
 new = np.newaxis
 
 # algo params
-box = 400 # (AU)
+box = 250 # (AU)
+eps = 1e-30
+size = lambda m: 1e2*m**(1/3)
+
+# utils
+def halve(x, s):
+    n0 = len(x) >> 1
+    n1 = np.sum(s)
+    xp = np.zeros(n0)
+    xp[:n1] = x[s]
+    return xp
 
 # astro params
-N = 2**8 # number of particles
+N = 2**10 # number of particles
 M = 1 # sol masses
 dt = 0.1 # years
+crad = 1e0 # AU
 
 # scale
 L = 1.496e11 # length scale (1 AU)
@@ -23,56 +36,102 @@ T = 3.154e8 # time step (1 year)
 # units
 G = G0*(1/L**3)*(K)*(T**2)
 
+# state
+st = vt.Bundle()
+
 # initialize
-mas = (1e18/K)*np.exp(20*np.random.rand(N))
-posx = (1e13/L)*(2*np.random.rand(N)-1)
-posy = (1e13/L)*(2*np.random.rand(N)-1)
-rad = np.sqrt(posx**2+posy**2)
+st.mas = (1e18/K)*np.exp(20*np.random.rand(N))
+st.posx = (1e13/L)*(2*np.random.rand(N)-1)
+st.posy = (1e13/L)*(2*np.random.rand(N)-1)
+rad = np.sqrt(st.posx**2+st.posy**2)
 spd = np.sqrt(G*M/rad)
-velx = (posy/rad)*spd
-vely = -(posx/rad)*spd
+st.velx = (st.posy/rad)*spd
+st.vely = -(st.posx/rad)*spd
 
 # perturb
-velx += 1*(2*np.random.rand(N)-1)
-vely += 1*(2*np.random.rand(N)-1)
+st.velx += 1*(2*np.random.rand(N)-1)
+st.vely += 1*(2*np.random.rand(N)-1)
 
 # the star
-mas[0] = M
-posx[0] = 0
-posy[0] = 0
-velx[0] = 0
-vely[0] = 0
+st.mas[0] = M
+st.posx[0] = 0
+st.posy[0] = 0
+st.velx[0] = 0
+st.vely[0] = 0
 
 # plot
 fig, ax = plt.subplots(figsize=(5, 5))
-sc = ax.scatter(posx, posy, s=np.log(K*mas)-30)
+sc = ax.scatter(st.posx, st.posy, s=size(st.mas))
 ax.set_xlim(-box, box)
 ax.set_ylim(-box, box)
 
+k = 0
 while True:
-    # calculate accel
-    delx = posx[new, :] - posx[:, new]
-    dely = posy[new, :] - posy[:, new]
+    if k % 100 == 0:
+        print('rep %d' % k)
+
+    # reduce
+    sel = st.mas > 0
+    n = np.sum(sel)
+    if n <= (N >> 1):
+        print('halving, n = %d' % (N>>1))
+        N = N >> 1
+        st.mas = halve(st.mas, sel)
+        st.posx = halve(st.posx, sel)
+        st.posy = halve(st.posy, sel)
+        st.velx = halve(st.velx, sel)
+        st.vely = halve(st.vely, sel)
+        ax.cla()
+        sc = ax.scatter(st.posx, st.posy, s=size(st.mas))
+        ax.set_xlim(-box, box)
+        ax.set_ylim(-box, box)
+
+    # distances
+    delx = st.posx[new, :] - st.posx[:, new]
+    dely = st.posy[new, :] - st.posy[:, new]
     rmat = np.sqrt(delx**2+dely**2)
-    fmat = G*mas/rmat**2
+
+    # collisions
+    coli, colj = (rmat<crad).nonzero()
+    ncol = len(coli)
+    if ncol > 0:
+        sel = (coli<colj) & (st.mas[coli]>0) & (st.mas[colj]>0)
+        ncol = np.sum(sel)
+        if ncol > 0:
+            print(np.sum(st.mas>0))
+            coli = coli[sel]
+            colj = colj[sel]
+            tmas = st.mas[coli] + st.mas[colj]
+            st.posx[coli] = (st.mas[coli]*st.posx[coli]+st.mas[colj]*st.posx[colj])/tmas
+            st.posy[coli] = (st.mas[coli]*st.posy[coli]+st.mas[colj]*st.posy[colj])/tmas
+            st.velx[coli] = (st.mas[coli]*st.velx[coli]+st.mas[colj]*st.velx[colj])/tmas
+            st.vely[coli] = (st.mas[coli]*st.vely[coli]+st.mas[colj]*st.vely[colj])/tmas
+            st.mas[coli] = tmas
+            st.mas[colj] = 0
+
+    # calculate accel
+    fmat = G*st.mas/rmat**2
     accx = (delx/rmat)*fmat
     accy = (dely/rmat)*fmat
-    np.fill_diagonal(accx, 0)
-    np.fill_diagonal(accy, 0)
+    accx[np.isnan(accx)] = 0
+    accy[np.isnan(accy)] = 0
     movx = np.sum(accx, 1)
     movy = np.sum(accy, 1)
 
     # immobile star
-    movx[0] = 0
-    movy[0] = 0
+    movx[:] -= movx[0]
+    movy[:] -= movy[0]
 
     # implement accel
-    posx += dt*velx
-    posy += dt*vely
-    velx += dt*movx
-    vely += dt*movy
+    st.posx += dt*st.velx
+    st.posy += dt*st.vely
+    st.velx += dt*movx
+    st.vely += dt*movy
 
     # update plot
-    sc.set_offsets(np.dstack([posx,posy]))
+    sc.set_offsets(np.dstack([st.posx, st.posy]))
+    sc.set_sizes(size(st.mas))
     fig.canvas.draw()
+
+    k += 1
 
