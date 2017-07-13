@@ -10,9 +10,9 @@ plt.ion()
 new = np.newaxis
 
 # algo params
-box = 250 # (AU)
-eps = 1e-30
-size = lambda m: 1e2*m**(1/3)
+rep = 100
+box = 500 # (AU)
+size = lambda m: np.r_[50, 1e5*m[1:]**(1/1.5)]
 
 # utils
 def halve(x, s):
@@ -23,10 +23,10 @@ def halve(x, s):
     return xp
 
 # astro params
-N = 2**10 # number of particles
+N = 2**8 # number of particles
 M = 1 # sol masses
-dt = 0.1 # years
-crad = 1e0 # AU
+dt = 0.01 # years
+crad = 1e-1 # AU
 
 # scale
 L = 1.496e11 # length scale (1 AU)
@@ -40,13 +40,13 @@ G = G0*(1/L**3)*(K)*(T**2)
 st = vt.Bundle()
 
 # initialize
-st.mas = (1e18/K)*np.exp(20*np.random.rand(N))
-st.posx = (1e13/L)*(2*np.random.rand(N)-1)
-st.posy = (1e13/L)*(2*np.random.rand(N)-1)
+st.mas = (1e24/K)*np.exp(2*np.random.rand(N)-1)
+st.posx = (1e13/L)*np.random.randn(N)
+st.posy = (1e13/L)*np.random.randn(N)
 rad = np.sqrt(st.posx**2+st.posy**2)
 spd = np.sqrt(G*M/rad)
-st.velx = (st.posy/rad)*spd
-st.vely = -(st.posx/rad)*spd
+st.velx = 0.7*(st.posy/rad)*spd
+st.vely = -0.7*(st.posx/rad)*spd
 
 # perturb
 st.velx += 1*(2*np.random.rand(N)-1)
@@ -129,9 +129,10 @@ while True:
     st.vely += dt*movy
 
     # update plot
-    sc.set_offsets(np.dstack([st.posx, st.posy]))
-    sc.set_sizes(size(st.mas))
-    fig.canvas.draw()
+    if k % rep == 0:
+        sc.set_offsets(np.dstack([st.posx, st.posy]))
+        sc.set_sizes(size(st.mas))
+        fig.canvas.draw()
 
     k += 1
 
